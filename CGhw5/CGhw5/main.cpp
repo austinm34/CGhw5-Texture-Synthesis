@@ -11,10 +11,10 @@ struct samp_wind {
 	double dist;
 };
 
-std::vector<std::vector<double>> getwp(std::vector<std::vector<double>> &image, int x, int y, int u, int v);	// all of this will eventually have another parameter for window size
-std::vector<std::vector<double>> getkp(std::vector<std::vector<double>> &wp);
-std::vector<std::vector<double>> getgauss();
-std::vector<std::vector<double>> getws(std::vector<std::vector<double>> &sample, int x, int y);
+std::vector<std::vector<double>> getwp(std::vector<std::vector<double>> &image, int x, int y, int u, int v, int wsize);	// all of this will eventually have another parameter for window size
+std::vector<std::vector<double>> getkp(std::vector<std::vector<double>> &wp, int wsize);
+std::vector<std::vector<double>> getgauss(int wsize, double sig);
+std::vector<std::vector<double>> getws(std::vector<std::vector<double>> &sample, int x, int y, int wsize);
 std::vector<std::vector<double>> mult(std::vector<std::vector<double>> a1, std::vector<std::vector<double>> a2, int s);
 std::vector<std::vector<double>> sub(std::vector<std::vector<double>> a1, std::vector<std::vector<double>> a2, int s);
 double vec_sum(std::vector<std::vector<double>> a1, int s);
@@ -31,7 +31,7 @@ int main() {
 	unsigned width, height;
 
 	// ================================= decode image ==================================
-	unsigned error = lodepng::decode(image, width, height, "small_sand.png");
+	unsigned error = lodepng::decode(image, width, height, "input.png");
 	int length = width * height * 4;
 
 	if (error) {
@@ -96,27 +96,20 @@ int main() {
 	// bool test = true;
 	while (x1_good || x2_good || y1_good || y2_good) {			// possible issue, this calculates the corners twice each time the loop goes around.
 
-		if (x1 < 10) {
-			std::cout << "x1: " << x1 << " x2: " << x2 << " y1: " << y1 << " y2: " << y2 << std::endl;
-		}
 
 		for (int j = y1; j <= y2; j++) {			// top
-			//synthesized_image[x1][j] = 255;
 			synthesize_pixel(synthesized_image, sample_image, x1, j, u, v, 3);
 		}	
 		std::cout << "top done" << std::endl;
 		for (int i = x1; i <= x2; i++) {			// right
-			//synthesized_image[i][y2] = 255;
 			synthesize_pixel(synthesized_image, sample_image, i, y2, u, v, 3);
 		}
 		std::cout << "right done" << std::endl;
 		for (int j = y2; j > y1; j--) {			// bottom	I don't know why only a > works, it shouldn't but it does
-			//synthesized_image[x2][j] = 255;
 			synthesize_pixel(synthesized_image, sample_image, x2, j, u, v, 3);
 		}
 		std::cout << "bottom done" << std::endl;
 		for (int i = x2; i > x1; i--) {			// left
-			//synthesized_image[i][y1] = 255;
 			synthesize_pixel(synthesized_image, sample_image, i, y1, u, v, 3);
 		}
 
@@ -140,38 +133,7 @@ int main() {
 		if (y2_good)
 			y2++;
 	}
-	//*/
-	// ========================================== test, lets calculate one pixel =====================================
-	/*
-	int wsize = 3;
-	int wind_wid = 3 / 2;
-	// were going to synthesize at point x2, middle_y
-
-	// step one: get wp
-	std::vector<std::vector<double>> wp = getwp(synthesized_image, x2, middle_y, u, v);
-	// step two: get kp
-	std::vector<std::vector<double>> kp = getkp(wp);
-	// step three: iterate through sample and get the top 3 matches
-	std::vector<samp_wind> sample_windows;
-	std::vector<std::vector<double>> ws;
-	samp_wind temp_wind;
-	for (int i = wind_wid; i < u - wind_wid; i++) {
-		for (int j = wind_wid; j < v - wind_wid; j++) {
-		
-			ws = getws(sample_image, i, j);
-			temp_wind.x = i;
-			temp_wind.y = j;
-			temp_wind.dist = dist(wp, kp, ws, wsize);
-			sample_windows.push_back(temp_wind);
-
-		}
-	}
-	std::vector<samp_wind> top3 = min_3(sample_windows, wsize);
-	int win_ind = rand() % 3;
-	synthesized_image[x2][middle_y] = sample_image[top3[win_ind].x][top3[win_ind].y];
-
-	// we've synthesized 1 pixel !
-	*/
+	
 	// ========================================= synthesis end, prepare to encode ===================================
 
 	//put image array back into vector to be encoded. we'll use the original one we decoded so we don't
@@ -187,7 +149,7 @@ int main() {
 	}
 
 	//================================= encode image =====================================
-	error = lodepng::encode("sand_out.png", image, width, height);
+	error = lodepng::encode("output.png", image, width, height);
 
 	if (error) {
 		std::cout << "encoder error " << error << ": " << lodepng_error_text(error) << std::endl;
@@ -200,32 +162,32 @@ int main() {
 }
 
 
-std::vector<std::vector<double>> getwp(std::vector<std::vector<double>> &image, int x, int y, int u, int v) {
+std::vector<std::vector<double>> getwp(std::vector<std::vector<double>> &image, int x, int y, int u, int v, int wsize) {
 
 	// image is an array storing the image to be synthesized
 	// x and y are the center pixel we want to generate a window around
 	// u and v are the width and height of the image so we can check bounds
-
-	std::vector<std::vector<double>> wp(3, std::vector<double>(3, -1));	// both "3s" will eventually be the window size
+	int wind_width = wsize / 2;
+	std::vector<std::vector<double>> wp(wsize, std::vector<double>(wsize, -1));	// both "3s" will eventually be the window size
 
 	int inval_l, inval_r, inval_t, inval_b;
 	inval_l = inval_r = inval_t = inval_b = 0;
 
-	if (x - 1 < 0) {	// eventually 1 will be floor(size/2)
+	if (x - wind_width < 0) {	// eventually 1 will be floor(size/2)
 		inval_t = 1;	// this will eventually be how many pixels we need to not update in the mask, aka abs(x-1)
 	}					// for now we're using the simple case of a 3x3 window
-	if (x + 1 > u) {
+	if (x + wind_width > u) {
 		inval_b = 1;
 	}
-	if (y - 1 < 0) {
+	if (y - wind_width < 0) {
 		inval_l = 1;
 	}
-	if (y + 1 > u) {
+	if (y + wind_width > u) {
 		inval_r = 1;
 	}
 
-	for (int i = inval_t; i < 3 - inval_b; i++) {			// "3" will eventually be the window size
-		for (int j = inval_l; j < 3 - inval_r; j++) {
+	for (int i = inval_t; i < wsize - inval_b; i++) {			// "3" will eventually be the window size
+		for (int j = inval_l; j < wsize - inval_r; j++) {
 			wp[i][j] = image[i][j];
 		}
 	}
@@ -234,10 +196,10 @@ std::vector<std::vector<double>> getwp(std::vector<std::vector<double>> &image, 
 
 }
 
-std::vector<std::vector<double>> getkp(std::vector<std::vector<double>> &wp) {	// gets "known" vector for the pixel, or kp.
-	std::vector<std::vector<double>> kp(3, std::vector<double>(3, 0));
-	for (int i = 0; i < 3; i++) {
-		for (int j = 0; j < 3; j++) {
+std::vector<std::vector<double>> getkp(std::vector<std::vector<double>> &wp, int wsize) {	// gets "known" vector for the pixel, or kp.
+	std::vector<std::vector<double>> kp(wsize, std::vector<double>(wsize, 0));
+	for (int i = 0; i < wsize; i++) {
+		for (int j = 0; j < wsize; j++) {
 			if (wp[i][j] != -1) {
 				kp[i][j] = 1;		// if not -1, then we know it. therefore set known = 1 for that position.
 			}
@@ -247,13 +209,13 @@ std::vector<std::vector<double>> getkp(std::vector<std::vector<double>> &wp) {	/
 	return kp;
 }
 
-std::vector<std::vector<double>> getgauss() {	// this will eventually take size and sigma
-	std::vector<std::vector<double>> gauss(3, std::vector<double>(3, 0));
+std::vector<std::vector<double>> getgauss(int wsize, double sig = 1) {	// this will eventually take size and sigma
+	std::vector<std::vector<double>> gauss(wsize, std::vector<double>(wsize, 0));
 
-	double sig = 0;
+	
 	double s = 2.0 * sig * sig;
 
-	int width = 1; // this will eventually be size/2
+	int width = wsize / 2; // this will eventually be size/2
 
 	for (int i = 0 - width; i < width; i++) {
 		for (int j = 0 - width; j < width; j++) {
@@ -266,14 +228,17 @@ std::vector<std::vector<double>> getgauss() {	// this will eventually take size 
 	return gauss;
 }
 
-std::vector<std::vector<double>> getws(std::vector<std::vector<double>> &sample, int x, int y) {
-	std::vector<std::vector<double>> ws(3, std::vector<double>(3, 0));
+std::vector<std::vector<double>> getws(std::vector<std::vector<double>> &sample, int x, int y, int wsize) {
+	std::vector<std::vector<double>> ws(wsize, std::vector<double>(wsize, 0));
 
 	// this function assumes that x and y are the center pixel, and are chosen in such away that edge
 	// cases will not arise for the given window size.
-	for (int i = 0; i < 3; i++) {		// 3 will be replaced by window size
-		for (int j = 0; j < 3; j++) {
-			ws[i][j] = sample[x - 1 + i][y - 1 + j];	// the ones will be replaced by a width = floor(size/2)
+
+	int wind_width = wsize / 2;
+
+	for (int i = 0; i < wsize; i++) {		// 3 will be replaced by window size
+		for (int j = 0; j < wsize; j++) {
+			ws[i][j] = sample[x - wind_width + i][y - wind_width + j];	// the ones will be replaced by a width = floor(size/2)
 		}
 	}
 
@@ -321,7 +286,7 @@ double dist(std::vector<std::vector<double>> &wp, std::vector<std::vector<double
 	std::vector<std::vector<double>> dif_known = mult(dif1, kp, s);	// difference only where wp is known
 	std::vector<std::vector<double>> sq_dif = mult(dif_known, dif_known, s);	// squared differences
 
-	std::vector<std::vector<double>> gaus = getgauss();
+	std::vector<std::vector<double>> gaus = getgauss(s, 1);
 	std::vector<std::vector<double>> gaus_known = mult(gaus, kp, s);	// gaussian kernel, only where known
 	double gaus_sum = vec_sum(gaus_known, s);	// sum of known gaussian, used for normalization
 
@@ -358,9 +323,9 @@ void synthesize_pixel(std::vector<std::vector<double>> &syn_image, std::vector<s
 	// were going to synthesize at point x2, middle_y
 
 	// step one: get wp
-	std::vector<std::vector<double>> wp = getwp(syn_image, x, y, u, v);
+	std::vector<std::vector<double>> wp = getwp(syn_image, x, y, u, v, wsize);
 	// step two: get kp
-	std::vector<std::vector<double>> kp = getkp(wp);
+	std::vector<std::vector<double>> kp = getkp(wp, wsize);
 	// step three: iterate through sample and get the top 3 matches
 	std::vector<samp_wind> sample_windows;
 	std::vector<std::vector<double>> ws;
@@ -368,7 +333,7 @@ void synthesize_pixel(std::vector<std::vector<double>> &syn_image, std::vector<s
 	for (int i = wind_wid; i < u - wind_wid; i++) {
 		for (int j = wind_wid; j < v - wind_wid; j++) {
 
-			ws = getws(samp_image, i, j);
+			ws = getws(samp_image, i, j, wsize);
 			temp_wind.x = i;
 			temp_wind.y = j;
 			temp_wind.dist = dist(wp, kp, ws, wsize);
