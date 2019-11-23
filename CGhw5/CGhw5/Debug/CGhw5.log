@@ -1,0 +1,4 @@
+﻿  main.cpp
+c:\users\austin\documents\c++\cghw5\cghw5\main.cpp(45): warning C4244: 'initializing': conversion from 'double' to 'int', possible loss of data
+  CGhw5.vcxproj -> C:\Users\Austin\Documents\c++\CGhw5\Debug\CGhw5.exe
+  CGhw5.vcxproj -> C:\Users\Austin\Documents\c++\CGhw5\Debug\CGhw5.pdb (Partial PDB)
